@@ -5,28 +5,31 @@ Visualizes how a language model's embedding representation evolves as more
 text context is accumulated, using LMStudio's OpenAI-compatible API.
 """
 
+from __future__ import annotations
 import argparse
 import os
 import re
-import string
 import sys
+import warnings
+
+warnings.filterwarnings("ignore", category=RuntimeWarning, module="sklearn")
+warnings.filterwarnings("ignore", message="n_jobs value 1 overridden", module="umap")
 
 from embedding_client import LMStudioClient
-from visualizer import plot_combined, plot_sentence_level, plot_word_level
+from visualizer import plot_combined, plot_sentence_level, plot_word_level, plot_common
 
 
-def read_text_input(args: argparse.Namespace) -> str:
-    """Read text from --text, --file, or stdin."""
-    if args.text:
-        return args.text
-    if args.file:
-        if not os.path.isfile(args.file):
-            print(f"Error: File not found: {args.file}", file=sys.stderr)
+def read_text_input(text_arg: str | None, file_arg: str | None) -> str | None:
+    """Read text from --text/--text2 or --file/--file2."""
+    if text_arg:
+        return text_arg
+    if file_arg:
+        if not os.path.isfile(file_arg):
+            print(f"Error: File not found: {file_arg}", file=sys.stderr)
             sys.exit(1)
-        with open(args.file, "r", encoding="utf-8") as f:
+        with open(file_arg, "r", encoding="utf-8") as f:
             return f.read()
-    # Read from stdin
-    return sys.stdin.read()
+    return None
 
 
 def split_sentences(text: str) -> list[str]:
@@ -64,13 +67,25 @@ def main():
         "--text", "-t",
         type=str,
         default=None,
-        help="Direct text input string",
+        help="First prompt text input",
     )
     parser.add_argument(
         "--file", "-f",
         type=str,
         default=None,
-        help="Path to text file to read",
+        help="Path to first prompt text file",
+    )
+    parser.add_argument(
+        "--text2",
+        type=str,
+        default=None,
+        help="Second prompt text input (for comparison)",
+    )
+    parser.add_argument(
+        "--file2",
+        type=str,
+        default=None,
+        help="Path to second prompt text file (for comparison)",
     )
     parser.add_argument(
         "--model", "-m",
@@ -92,63 +107,131 @@ def main():
     )
     args = parser.parse_args()
 
-    # Read input text
-    text = read_text_input(args)
-    if not text or not text.strip():
-        print("Error: No input text provided.", file=sys.stderr)
+    text1 = read_text_input(args.text, args.file)
+    text2 = read_text_input(args.text2, args.file2)
+
+    if not text1 or not text1.strip():
+        if not sys.stdin.isatty():
+            text1 = sys.stdin.read()
+        else:
+            print("Error: No input text provided. Use --text or --file.", file=sys.stderr)
+            sys.exit(1)
+
+    if not text1.strip():
+        print("Error: Empty input text.", file=sys.stderr)
         sys.exit(1)
 
-    # Ensure output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
-
-    # Initialize client
     client = LMStudioClient(base_url=args.url, model=args.model)
 
-    # --- Sentence-level processing ---
-    sentences = split_sentences(text)
-    print(f"Embedding {len(sentences)} sentences...")
-    cumulative_sentence_texts = build_cumulative_texts(sentences)
-    sentence_embeddings = client.get_embeddings(cumulative_sentence_texts)
-    print(f"  Computed {len(sentence_embeddings)} cumulative sentence embeddings.")
+    def process_prompt(text: str, name: str) -> dict:
+        print(f"\n--- Processing {name} ---")
+        sentences = split_sentences(text)
+        print(f"  Embedding {len(sentences)} sentences...")
+        cumulative_sentence_texts = build_cumulative_texts(sentences)
+        sentence_embeddings = client.get_embeddings(cumulative_sentence_texts)
 
-    # --- Word-level processing ---
-    words = split_words(text)
-    if len(words) < 2:
-        print("Warning: Need at least 2 words for word-level graph. Skipping.", file=sys.stderr)
-        word_embeddings = []
-    else:
-        print(f"Embedding {len(words)} words...")
-        cumulative_word_texts = build_cumulative_texts(words)
-        word_embeddings = client.get_embeddings(cumulative_word_texts)
-        print(f"  Computed {len(word_embeddings)} cumulative word embeddings.")
+        words = split_words(text)
+        if len(words) < 2:
+            print(f"  Warning: Need at least 2 words for word-level. Skipping.", file=sys.stderr)
+            word_embeddings = []
+        else:
+            print(f"  Embedding {len(words)} words...")
+            cumulative_word_texts = build_cumulative_texts(words)
+            word_embeddings = client.get_embeddings(cumulative_word_texts)
 
-    # --- Generate visualizations ---
-    print("Generating graphs...")
+        return {
+            "sentences": sentences,
+            "sentence_embeddings": sentence_embeddings,
+            "words": words,
+            "word_embeddings": word_embeddings,
+        }
 
-    sentence_labels = [f"S{i+1}" for i in range(len(sentences))]
-    word_labels = [f"W{i+1}" for i in range(len(words))] if word_embeddings else []
+    result1 = process_prompt(text1, "Prompt 1")
 
-    combined_output = os.path.join(args.output_dir, "combined.png")
+    print(f"\nGenerating graphs for Prompt 1...")
+    s_labels1 = [f"S{i+1}" for i in range(len(result1["sentences"]))]
+    w_labels1 = [f"W{i+1}" for i in range(len(result1["words"]))] if result1["word_embeddings"] else []
+
     plot_combined(
-        sentence_embeddings,
-        word_embeddings,
-        sentence_labels,
-        word_labels,
-        output_path=combined_output,
+        result1["sentence_embeddings"],
+        result1["word_embeddings"],
+        s_labels1,
+        w_labels1,
+        output_path=os.path.join(args.output_dir, "prompt1_combined.png"),
     )
+    plot_sentence_level(
+        result1["sentence_embeddings"],
+        s_labels1,
+        output_path=os.path.join(args.output_dir, "prompt1_sentence.png"),
+    )
+    if result1["word_embeddings"]:
+        plot_word_level(
+            result1["word_embeddings"],
+            w_labels1,
+            output_path=os.path.join(args.output_dir, "prompt1_word.png"),
+        )
 
-    sentence_output = os.path.join(args.output_dir, "sentence_level.png")
-    plot_sentence_level(sentence_embeddings, sentence_labels, output_path=sentence_output)
+    result2 = None
+    if text2 and text2.strip():
+        result2 = process_prompt(text2, "Prompt 2")
 
-    if word_embeddings:
-        word_output = os.path.join(args.output_dir, "word_level.png")
-        plot_word_level(word_embeddings, word_labels, output_path=word_output)
+        print(f"\nGenerating graphs for Prompt 2...")
+        s_labels2 = [f"S{i+1}" for i in range(len(result2["sentences"]))]
+        w_labels2 = [f"W{i+1}" for i in range(len(result2["words"]))] if result2["word_embeddings"] else []
+
+        plot_combined(
+            result2["sentence_embeddings"],
+            result2["word_embeddings"],
+            s_labels2,
+            w_labels2,
+            output_path=os.path.join(args.output_dir, "prompt2_combined.png"),
+        )
+        plot_sentence_level(
+            result2["sentence_embeddings"],
+            s_labels2,
+            output_path=os.path.join(args.output_dir, "prompt2_sentence.png"),
+        )
+        if result2["word_embeddings"]:
+            plot_word_level(
+                result2["word_embeddings"],
+                w_labels2,
+                output_path=os.path.join(args.output_dir, "prompt2_word.png"),
+            )
+
+    if result2:
+        print(f"\nGenerating common comparison plots...")
+
+        all_s_labels = [f"P1-S{i+1}" for i in range(len(result1["sentences"]))] + \
+                       [f"P2-S{i+1}" for i in range(len(result2["sentences"]))]
+        all_w_labels = [f"P1-W{i+1}" for i in range(len(result1["words"]))] + \
+                       [f"P2-W{i+1}" for i in range(len(result2["words"]))]
+
+        plot_common(
+            result1["sentence_embeddings"] + result2["sentence_embeddings"],
+            result1["word_embeddings"] + result2["word_embeddings"],
+            all_s_labels,
+            all_w_labels,
+            output_path=os.path.join(args.output_dir, "common.png"),
+        )
+
+        plot_sentence_level(
+            result1["sentence_embeddings"] + result2["sentence_embeddings"],
+            all_s_labels,
+            output_path=os.path.join(args.output_dir, "common_sentence.png"),
+        )
+
+        if result1["word_embeddings"] and result2["word_embeddings"]:
+            plot_word_level(
+                result1["word_embeddings"] + result2["word_embeddings"],
+                all_w_labels,
+                output_path=os.path.join(args.output_dir, "common_word.png"),
+            )
 
     print("\nDone! Output files:")
-    print(f"  Combined:        {os.path.abspath(combined_output)}")
-    print(f"  Sentence-level:  {os.path.abspath(sentence_output)}")
-    if word_embeddings:
-        print(f"  Word-level:      {os.path.abspath(word_output)}")
+    for f in sorted(os.listdir(args.output_dir)):
+        if f.endswith(".png"):
+            print(f"  {f}")
 
 
 if __name__ == "__main__":
