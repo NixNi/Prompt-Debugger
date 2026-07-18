@@ -111,6 +111,19 @@ def main():
         default=1,
         help="Number of embedding runs to average for stability (default: 1)",
     )
+    parser.add_argument(
+        "--point", "-p",
+        type=str,
+        action="append",
+        default=[],
+        help="Point text to embed and plot on all graphs (can be repeated)",
+    )
+    parser.add_argument(
+        "--point-radius",
+        type=float,
+        default=0.5,
+        help="Radius for point circles on graphs (default: 0.5)",
+    )
     args = parser.parse_args()
 
     text1 = read_text_input(args.text, args.file)
@@ -129,6 +142,23 @@ def main():
 
     os.makedirs(args.output_dir, exist_ok=True)
     client = LMStudioClient(base_url=args.url, model=args.model)
+
+    point_data = None
+    if args.point:
+        print(f"\nEmbedding {len(args.point)} point(s)...")
+        point_embeddings = client.get_embeddings(args.point, runs=args.runs)
+        point_labels = [f"P{i+1}" for i in range(len(args.point))]
+        point_data = (point_embeddings, point_labels, args.point_radius)
+        for text, emb in zip(args.point, point_embeddings):
+            print(f"  Point '{text[:50]}' embedded")
+
+    pp_kwargs = {}
+    if point_data:
+        pp_kwargs = {
+            "point_embeddings": point_data[0],
+            "point_labels": point_data[1],
+            "point_radius": point_data[2],
+        }
 
     def process_prompt(text: str, name: str) -> dict:
         print(f"\n--- Processing {name} ---")
@@ -165,17 +195,20 @@ def main():
         s_labels1,
         w_labels1,
         output_path=os.path.join(args.output_dir, "prompt1_combined.png"),
+        **pp_kwargs,
     )
     plot_sentence_level(
         result1["sentence_embeddings"],
         s_labels1,
         output_path=os.path.join(args.output_dir, "prompt1_sentence.png"),
+        **pp_kwargs,
     )
     if result1["word_embeddings"]:
         plot_word_level(
             result1["word_embeddings"],
             w_labels1,
             output_path=os.path.join(args.output_dir, "prompt1_word.png"),
+            **pp_kwargs,
         )
 
     result2 = None
@@ -192,17 +225,20 @@ def main():
             s_labels2,
             w_labels2,
             output_path=os.path.join(args.output_dir, "prompt2_combined.png"),
+            **pp_kwargs,
         )
         plot_sentence_level(
             result2["sentence_embeddings"],
             s_labels2,
             output_path=os.path.join(args.output_dir, "prompt2_sentence.png"),
+            **pp_kwargs,
         )
         if result2["word_embeddings"]:
             plot_word_level(
                 result2["word_embeddings"],
                 w_labels2,
                 output_path=os.path.join(args.output_dir, "prompt2_word.png"),
+                **pp_kwargs,
             )
 
     if result2:
@@ -219,12 +255,14 @@ def main():
             all_s_labels,
             all_w_labels,
             output_path=os.path.join(args.output_dir, "common.png"),
+            **pp_kwargs,
         )
 
         plot_sentence_level(
             result1["sentence_embeddings"] + result2["sentence_embeddings"],
             all_s_labels,
             output_path=os.path.join(args.output_dir, "common_sentence.png"),
+            **pp_kwargs,
         )
 
         if result1["word_embeddings"] and result2["word_embeddings"]:
@@ -232,6 +270,7 @@ def main():
                 result1["word_embeddings"] + result2["word_embeddings"],
                 all_w_labels,
                 output_path=os.path.join(args.output_dir, "common_word.png"),
+                **pp_kwargs,
             )
 
     print("\nDone! Output files:")

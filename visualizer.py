@@ -1,16 +1,69 @@
 """UMAP + matplotlib visualization for embedding trajectories."""
 
+from __future__ import annotations
+
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend for file output
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
 import umap
+
+
+POINT_COLORS = ["#E53935", "#D81B60", "#00897B", "#FF8F00"]
+
+
+def _draw_points(
+    ax: plt.Axes,
+    point_coords_2d: np.ndarray,
+    point_labels: list[str],
+    point_radius: float,
+) -> list:
+    """Draw point overlays as labeled stars with transparent radius circles."""
+    from matplotlib.lines import Line2D
+
+    import matplotlib.colors as mcolors
+    handles = []
+    for i, (x, y, label) in enumerate(zip(point_coords_2d[:, 0], point_coords_2d[:, 1], point_labels)):
+        color = POINT_COLORS[i % len(POINT_COLORS)]
+
+        # RGBA for independent face/edge alphas
+        face_rgba = list(mcolors.to_rgba(color))
+        face_rgba[3] = 0.1
+        edge_rgba = list(mcolors.to_rgba(color))
+        edge_rgba[3] = 0.5
+        circle = Circle((x, y), point_radius, facecolor=face_rgba, edgecolor=edge_rgba, linestyle="--", linewidth=1.5, zorder=1)
+        ax.add_patch(circle)
+
+        # Star marker
+        ax.scatter([x], [y], c=color, marker="*", s=200, edgecolors="white", linewidths=0.5, zorder=5)
+
+        # Label annotation
+        ax.annotate(
+            label,
+            (x, y),
+            fontsize=9,
+            fontweight="bold",
+            ha="center",
+            va="bottom",
+            xytext=(0, 12),
+            textcoords="offset points",
+            zorder=6,
+            color=color,
+        )
+
+        handles.append(Line2D([0], [0], marker="*", color="w", markerfacecolor=color, markersize=12, label=label))
+
+    return handles
 
 
 def plot_sentence_level(
     cumulative_embeddings: list[list[float]],
     sentence_labels: list[str],
     output_path: str = "sentence_level.png",
+    point_embeddings: list[list[float]] | None = None,
+    point_labels: list[str] | None = None,
+    point_radius: float = 0.5,
 ) -> str:
     """Plot sentence-level cumulative embedding trajectory."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -71,12 +124,19 @@ def plot_sentence_level(
         )
 
     ax.set_title("Sentence-level embedding trajectory", fontsize=14, fontweight="bold")
-    ax.set_xlabel("UMAP 1", fontsize=12)
-    ax.set_ylabel("UMAP 2", fontsize=12)
+    ax.set_xlabel("Component 1", fontsize=12)
+    ax.set_ylabel("Component 2", fontsize=12)
 
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c, markersize=8, label=g)
                        for g, c in group_colors.items() if g in prompt_groups]
+
+    # Point overlay
+    if point_embeddings is not None and point_labels is not None:
+        point_coords = reducer.transform(np.array(point_embeddings))
+        point_handles = _draw_points(ax, point_coords, point_labels, point_radius)
+        legend_elements.extend(point_handles)
+
     if legend_elements:
         ax.legend(handles=legend_elements, loc="best", fontsize=9)
 
@@ -91,6 +151,9 @@ def plot_word_level(
     cumulative_embeddings: list[list[float]],
     word_labels: list[str],
     output_path: str = "word_level.png",
+    point_embeddings: list[list[float]] | None = None,
+    point_labels: list[str] | None = None,
+    point_radius: float = 0.5,
 ) -> str:
     """Plot word-level cumulative embedding trajectory."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -168,12 +231,19 @@ def plot_word_level(
         )
 
     ax.set_title("Word-level embedding trajectory", fontsize=14, fontweight="bold")
-    ax.set_xlabel("UMAP 1", fontsize=12)
-    ax.set_ylabel("UMAP 2", fontsize=12)
+    ax.set_xlabel("Component 1", fontsize=12)
+    ax.set_ylabel("Component 2", fontsize=12)
 
     from matplotlib.lines import Line2D
     legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c, markersize=6, label=g)
                        for g, c in group_colors.items() if g in prompt_groups]
+
+    # Point overlay
+    if point_embeddings is not None and point_labels is not None:
+        point_coords = reducer.transform(np.array(point_embeddings))
+        point_handles = _draw_points(ax, point_coords, point_labels, point_radius)
+        legend_elements.extend(point_handles)
+
     if legend_elements:
         ax.legend(handles=legend_elements, loc="best", fontsize=9)
 
@@ -190,6 +260,9 @@ def plot_combined(
     sentence_labels: list[str],
     word_labels: list[str],
     output_path: str = "combined.png",
+    point_embeddings: list[list[float]] | None = None,
+    point_labels: list[str] | None = None,
+    point_radius: float = 0.5,
 ) -> str:
     """Plot both trajectories on the same UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -237,8 +310,14 @@ def plot_combined(
             ax.annotate(word_labels[-1], (word_coords[-1, 0], word_coords[-1, 1]), fontsize=6, ha="center", va="bottom", xytext=(0, 5), textcoords="offset points", zorder=4)
 
     ax.set_title("Combined embedding trajectory (shared UMAP space)", fontsize=14, fontweight="bold")
-    ax.set_xlabel("UMAP 1", fontsize=12)
-    ax.set_ylabel("UMAP 2", fontsize=12)
+    ax.set_xlabel("Component 1", fontsize=12)
+    ax.set_ylabel("Component 2", fontsize=12)
+
+    # Point overlay
+    if point_embeddings is not None and point_labels is not None:
+        point_coords = reducer.transform(np.array(point_embeddings))
+        _draw_points(ax, point_coords, point_labels, point_radius)
+
     ax.legend(loc="best", fontsize=10)
 
     plt.tight_layout()
@@ -254,6 +333,9 @@ def plot_common(
     sentence_labels: list[str],
     word_labels: list[str],
     output_path: str = "common.png",
+    point_embeddings: list[list[float]] | None = None,
+    point_labels: list[str] | None = None,
+    point_radius: float = 0.5,
 ) -> str:
     """Plot all trajectories from multiple prompts on one shared UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -322,8 +404,14 @@ def plot_common(
                 ax.annotate(labels[-1], (pts[-1, 0], pts[-1, 1]), fontsize=5, ha="center", va="bottom", xytext=(0, 4), textcoords="offset points", zorder=4)
 
     ax.set_title("Common comparison — all trajectories (shared UMAP)", fontsize=14, fontweight="bold")
-    ax.set_xlabel("UMAP 1", fontsize=12)
-    ax.set_ylabel("UMAP 2", fontsize=12)
+    ax.set_xlabel("Component 1", fontsize=12)
+    ax.set_ylabel("Component 2", fontsize=12)
+
+    # Point overlay
+    if point_embeddings is not None and point_labels is not None:
+        point_coords = reducer.transform(np.array(point_embeddings))
+        _draw_points(ax, point_coords, point_labels, point_radius)
+
     ax.legend(loc="best", fontsize=9)
 
     plt.tight_layout()
