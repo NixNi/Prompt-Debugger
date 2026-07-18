@@ -105,6 +105,12 @@ def main():
         default="results",
         help="Output directory for graphs (default: results)",
     )
+    parser.add_argument(
+        "--runs", "-r",
+        type=int,
+        default=1,
+        help="Number of embedding runs to average for stability (default: 1)",
+    )
     args = parser.parse_args()
 
     text1 = read_text_input(args.text, args.file)
@@ -129,7 +135,7 @@ def main():
         sentences = split_sentences(text)
         print(f"  Embedding {len(sentences)} sentences...")
         cumulative_sentence_texts = build_cumulative_texts(sentences)
-        sentence_embeddings = client.get_embeddings(cumulative_sentence_texts)
+        sentence_embeddings = client.get_embeddings(cumulative_sentence_texts, runs=args.runs)
 
         words = split_words(text)
         if len(words) < 2:
@@ -138,7 +144,7 @@ def main():
         else:
             print(f"  Embedding {len(words)} words...")
             cumulative_word_texts = build_cumulative_texts(words)
-            word_embeddings = client.get_embeddings(cumulative_word_texts)
+            word_embeddings = client.get_embeddings(cumulative_word_texts, runs=args.runs)
 
         return {
             "sentences": sentences,

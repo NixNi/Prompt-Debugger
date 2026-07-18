@@ -50,41 +50,53 @@ class LMStudioClient:
             )
             raise
 
-    def get_embeddings(self, texts: list[str], batch_size: int = 32) -> list[list[float]]:
-        """Embed multiple texts, chunking into batches to avoid API limits."""
+    def get_embeddings(self, texts: list[str], batch_size: int = 32, runs: int = 1) -> list[list[float]]:
+        """Embed multiple texts, chunking into batches. Optionally run N times and average."""
         if not texts:
             return []
 
-        cleaned = [self._prepare_text(t) for t in texts]
-        all_embeddings: list[list[float]] = []
+        import numpy as np
 
-        for i in range(0, len(cleaned), batch_size):
-            chunk = cleaned[i : i + batch_size]
-            try:
-                response = self.client.embeddings.create(
-                    model=self.model,
-                    input=chunk,
-                )
-                all_embeddings.extend(item.embedding for item in response.data)
-            except APIConnectionError:
-                print(
-                    f"Error: Cannot connect to LMStudio at {self.base_url}. "
-                    "Make sure LMStudio is running and the embedding model is loaded.",
-                    file=sys.stderr,
-                )
-                raise
-            except APITimeoutError:
-                print(
-                    f"Error: Request to LMStudio timed out after 30s. "
-                    "The server may be overloaded.",
-                    file=sys.stderr,
-                )
-                raise
-            except APIStatusError as e:
-                print(
-                    f"Error: LMStudio returned status {e.status_code}: {e.message}",
-                    file=sys.stderr,
-                )
-                raise
+        all_runs = []
+        for run in range(runs):
+            if runs > 1:
+                print(f"  Run {run + 1}/{runs}...")
+            cleaned = [self._prepare_text(t) for t in texts]
+            run_embeddings: list[list[float]] = []
 
-        return all_embeddings
+            for i in range(0, len(cleaned), batch_size):
+                chunk = cleaned[i : i + batch_size]
+                try:
+                    response = self.client.embeddings.create(
+                        model=self.model,
+                        input=chunk,
+                    )
+                    run_embeddings.extend(item.embedding for item in response.data)
+                except APIConnectionError:
+                    print(
+                        f"Error: Cannot connect to LMStudio at {self.base_url}. "
+                        "Make sure LMStudio is running and the embedding model is loaded.",
+                        file=sys.stderr,
+                    )
+                    raise
+                except APITimeoutError:
+                    print(
+                        f"Error: Request to LMStudio timed out after 30s. "
+                        "The server may be overloaded.",
+                        file=sys.stderr,
+                    )
+                    raise
+                except APIStatusError as e:
+                    print(
+                        f"Error: LMStudio returned status {e.status_code}: {e.message}",
+                        file=sys.stderr,
+                    )
+                    raise
+
+            all_runs.append(run_embeddings)
+
+        if len(all_runs) == 1:
+            return all_runs[0]
+
+        averaged = np.mean(all_runs, axis=0).tolist()
+        return averaged

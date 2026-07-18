@@ -12,17 +12,7 @@ def plot_sentence_level(
     sentence_labels: list[str],
     output_path: str = "sentence_level.png",
 ) -> str:
-    """Plot sentence-level cumulative embedding trajectory.
-
-    Args:
-        cumulative_embeddings: List of embeddings where each embedding represents
-            the cumulative context up to that sentence.
-        sentence_labels: Human-readable labels for each point.
-        output_path: Path to save the output PNG.
-
-    Returns:
-        The output_path on success.
-    """
+    """Plot sentence-level cumulative embedding trajectory."""
     embeddings_array = np.array(cumulative_embeddings)
     n_points = len(embeddings_array)
 
@@ -30,14 +20,12 @@ def plot_sentence_level(
         print("Warning: Need at least 2 sentences to create a trajectory plot.")
         return output_path
 
-    if n_points < 5:
-        print("Warning: UMAP results may be unstable with fewer than 5 points.")
+    unique_ratio = len(np.unique(embeddings_array, axis=0)) / n_points
+    use_pca = n_points <= 10 or unique_ratio < 0.5
 
-    # For very small datasets, use PCA fallback instead of UMAP
-    if n_points <= 5:
+    if use_pca:
         from sklearn.decomposition import PCA
         reducer = PCA(n_components=2, random_state=42)
-        coords = reducer.fit_transform(embeddings_array)
     else:
         n_neighbors = min(15, n_points - 1)
         reducer = umap.UMAP(
@@ -47,7 +35,8 @@ def plot_sentence_level(
             metric="cosine",
             random_state=42,
         )
-        coords = reducer.fit_transform(embeddings_array)
+
+    coords = reducer.fit_transform(embeddings_array)
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
@@ -103,17 +92,7 @@ def plot_word_level(
     word_labels: list[str],
     output_path: str = "word_level.png",
 ) -> str:
-    """Plot word-level cumulative embedding trajectory.
-
-    Args:
-        cumulative_embeddings: List of embeddings where each embedding represents
-            the cumulative context up to that word.
-        word_labels: Human-readable labels for each point.
-        output_path: Path to save the output PNG.
-
-    Returns:
-        The output_path on success.
-    """
+    """Plot word-level cumulative embedding trajectory."""
     embeddings_array = np.array(cumulative_embeddings)
     n_points = len(embeddings_array)
 
@@ -121,13 +100,12 @@ def plot_word_level(
         print("Warning: Need at least 2 words to create a trajectory plot.")
         return output_path
 
-    if n_points < 5:
-        print("Warning: UMAP results may be unstable with fewer than 5 points.")
+    unique_ratio = len(np.unique(embeddings_array, axis=0)) / n_points
+    use_pca = n_points <= 10 or unique_ratio < 0.5
 
-    if n_points <= 5:
+    if use_pca:
         from sklearn.decomposition import PCA
         reducer = PCA(n_components=2, random_state=42)
-        coords = reducer.fit_transform(embeddings_array)
     else:
         n_neighbors = min(15, n_points - 1)
         reducer = umap.UMAP(
@@ -137,7 +115,8 @@ def plot_word_level(
             metric="cosine",
             random_state=42,
         )
-        coords = reducer.fit_transform(embeddings_array)
+
+    coords = reducer.fit_transform(embeddings_array)
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
