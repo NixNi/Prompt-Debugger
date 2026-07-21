@@ -14,5 +14,5 @@ python3 main.py \
   --point "The Internet of Things connects everyday devices to the network" \
   --model "text-embedding-qwen3-embedding-0.6b" \
   --timeout 240 \
-  --simplify-epsilon 0.99
+  --simplify-epsilon 0.99 \
   --output-dir results/example
