@@ -6,7 +6,21 @@ import numpy as np
 import plotly.graph_objects as go
 
 
-POINT_COLORS = ["#E53935", "#D81B60", "#00897B", "#FF8F00"]
+POINT_COLORS = [
+    "#E53935", "#D81B60", "#00897B", "#FF8F00",
+    "#5C6BC0", "#26A69A", "#AB47BC", "#42A5F5",
+    "#66BB6A", "#FFA726", "#EC407A", "#78909C",
+]
+
+
+def _point_label(text: str) -> str:
+    """Extract a short label from point text: first 1-2 words or up to first period."""
+    if "." in text:
+        before_dot = text.split(".")[0].strip()
+        words = before_dot.split()
+        return " ".join(words[:2]) if len(words) >= 2 else before_dot
+    words = text.split()
+    return " ".join(words[:2]) if len(words) >= 2 else (words[0] if words else text[:15])
 
 
 def _make_reducer(n_points: int, n_components: int = 3):
@@ -59,6 +73,7 @@ def _add_point_overlay(
     point_embeddings: list[list[float]],
     point_labels: list[str],
     point_radius: float,
+    point_full_texts: list[str] | None = None,
 ) -> None:
     """Add point overlays as labeled stars with transparent radius spheres."""
     point_coords = reducer.transform(np.array(point_embeddings))
@@ -66,6 +81,7 @@ def _add_point_overlay(
         zip(point_coords[:, 0], point_coords[:, 1], point_coords[:, 2], point_labels)
     ):
         color = POINT_COLORS[i % len(POINT_COLORS)]
+        hover_text = point_full_texts[i] if point_full_texts else label
 
         # Transparent sphere for radius
         u = np.linspace(0, 2 * np.pi, 16)
@@ -83,13 +99,16 @@ def _add_point_overlay(
             hoverinfo="skip",
         ))
 
-        # Star marker
+        # Diamond marker with small text label, full text + coords on hover
         fig.add_trace(go.Scatter3d(
             x=[x], y=[y], z=[z],
             mode="markers+text",
             marker=dict(size=8, color=color, symbol="diamond", line=dict(width=1, color="white")),
             text=[label],
             textposition="top center",
+            textfont=dict(size=8, color=color),
+            hovertext=[hover_text],
+            hovertemplate="<b>%{hovertext}</b><br>x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}<extra></extra>",
             name=f"Point: {label}",
             showlegend=True,
         ))
@@ -175,6 +194,7 @@ def plot_sentence_level(
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
+    point_full_texts: list[str] | None = None,
 ) -> str:
     """Plot sentence-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -197,7 +217,7 @@ def plot_sentence_level(
     fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups)
 
     if point_embeddings is not None and point_labels is not None:
-        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
 
     fig.write_html(output_path)
     print(f"Saved sentence-level plot to: {output_path}")
@@ -211,6 +231,7 @@ def plot_word_level(
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
+    point_full_texts: list[str] | None = None,
 ) -> str:
     """Plot word-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -233,7 +254,7 @@ def plot_word_level(
     fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups)
 
     if point_embeddings is not None and point_labels is not None:
-        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
 
     fig.write_html(output_path)
     print(f"Saved word-level plot to: {output_path}")
@@ -249,6 +270,7 @@ def plot_combined(
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
+    point_full_texts: list[str] | None = None,
 ) -> str:
     """Plot both trajectories on the same shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -309,7 +331,7 @@ def plot_combined(
     )
 
     if point_embeddings is not None and point_labels is not None:
-        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
 
     fig.write_html(output_path)
     print(f"Saved combined plot to: {output_path}")
@@ -325,6 +347,7 @@ def plot_common(
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
+    point_full_texts: list[str] | None = None,
 ) -> str:
     """Plot all trajectories from multiple prompts on one shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -408,7 +431,7 @@ def plot_common(
     )
 
     if point_embeddings is not None and point_labels is not None:
-        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
 
     fig.write_html(output_path)
     print(f"Saved common plot to: {output_path}")

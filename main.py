@@ -44,6 +44,22 @@ def split_words(text: str) -> list[str]:
     return [w for w in words if w]
 
 
+def point_short_label(text: str) -> str:
+    """Extract a short label: first 1-2 words (skipping leading articles) or up to first period."""
+    _articles = {"a", "an", "the"}
+    if "." in text:
+        before_dot = text.split(".")[0].strip()
+        words = before_dot.split()
+    else:
+        words = text.split()
+    # Skip leading articles
+    while words and words[0].lower().rstrip(".,;:") in _articles:
+        words = words[1:]
+    if not words:
+        words = text.split()
+    return " ".join(words[:2]) if len(words) >= 2 else (words[0] if words else text[:15])
+
+
 def build_cumulative_texts(parts: list[str]) -> list[str]:
     """Build cumulative texts: [p1, p1+p2, p1+p2+p3, ...]."""
     cumulative = []
@@ -153,10 +169,10 @@ def main():
     if args.point:
         print(f"\nEmbedding {len(args.point)} point(s)...")
         point_embeddings = client.get_embeddings(args.point, runs=args.runs)
-        point_labels = [f"P{i+1}" for i in range(len(args.point))]
-        point_data = (point_embeddings, point_labels, args.point_radius)
-        for text, emb in zip(args.point, point_embeddings):
-            print(f"  Point '{text[:50]}' embedded")
+        point_labels = [point_short_label(t) for t in args.point]
+        point_data = (point_embeddings, point_labels, args.point_radius, list(args.point))
+        for text, label in zip(args.point, point_labels):
+            print(f"  Point [{label}] '{text[:60]}' embedded")
 
     pp_kwargs = {}
     if point_data:
@@ -164,6 +180,7 @@ def main():
             "point_embeddings": point_data[0],
             "point_labels": point_data[1],
             "point_radius": point_data[2],
+            "point_full_texts": point_data[3],
         }
 
     def process_prompt(text: str, name: str) -> dict:
