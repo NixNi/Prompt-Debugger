@@ -185,6 +185,41 @@ def _build_figure(
     return fig
 
 
+def simplify_trajectory(
+    embeddings: np.ndarray,
+    labels: list[str],
+    texts: list[str],
+    threshold: float,
+) -> tuple[list[int], list[str], list[str]]:
+    """Return indices to keep based on cosine similarity between consecutive points.
+
+    Adjacent points with cosine similarity > threshold are merged.
+    Returns (keep_indices, merged_labels, merged_texts).
+    """
+    if threshold <= 0 or len(embeddings) < 2:
+        return list(range(len(embeddings))), labels, texts
+
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norms = np.where(norms < 1e-12, 1.0, norms)
+    normalized = embeddings / norms
+
+    keep: list[int] = [0]
+    for i in range(1, len(embeddings)):
+        sim = float(np.dot(normalized[keep[-1]], normalized[i]))
+        if sim <= threshold:
+            keep.append(i)
+
+    merged_labels: list[str] = []
+    merged_texts: list[str] = []
+    for k_idx, idx in enumerate(keep):
+        group_end = keep[k_idx + 1] if k_idx + 1 < len(keep) else len(embeddings)
+        merged_labels.append(labels[idx])
+        merged_texts.append(" ".join(texts[j] for j in range(idx, group_end) if j < len(texts)))
+
+    print(f"  Simplified: {len(embeddings)} → {len(keep)} points (cosine threshold={threshold})")
+    return keep, merged_labels, merged_texts
+
+
 def _get_group_prefix(label: str) -> str:
     return label.split("-")[0] if "-" in label else "P1"
 
@@ -198,6 +233,7 @@ def plot_sentence_level(
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
     sentence_texts: list[str] | None = None,
+    simplify_epsilon: float = 0.0,
 ) -> str:
     """Plot sentence-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -208,6 +244,8 @@ def plot_sentence_level(
         return output_path
 
     reducer = _make_reducer_from_embeddings(cumulative_embeddings, n_components=3)
+
+    use_texts = sentence_texts
     coords = reducer.transform(embeddings_array)
 
     prompt_groups: dict[str, list[int]] = {}
@@ -217,7 +255,7 @@ def plot_sentence_level(
 
     group_colors = {"P1": "#1976D2", "P2": "#388E3C", "P3": "#7B1FA2"}
 
-    fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups, texts=sentence_texts)
+    fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups, texts=use_texts)
 
     if point_embeddings is not None and point_labels is not None:
         _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
@@ -236,6 +274,7 @@ def plot_word_level(
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
     word_texts: list[str] | None = None,
+    simplify_epsilon: float = 0.0,
 ) -> str:
     """Plot word-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -246,7 +285,16 @@ def plot_word_level(
         return output_path
 
     reducer = _make_reducer_from_embeddings(cumulative_embeddings, n_components=3)
-    coords = reducer.transform(embeddings_array)
+
+    if simplify_epsilon > 0 and n_points >= 3:
+        use_texts = word_texts if word_texts else word_labels
+        keep_idx, word_labels, use_texts = simplify_trajectory(
+            embeddings_array, word_labels, use_texts, simplify_epsilon,
+        )
+        coords = reducer.transform(embeddings_array[keep_idx])
+    else:
+        use_texts = word_texts
+        coords = reducer.transform(embeddings_array)
 
     prompt_groups: dict[str, list[int]] = {}
     for i, label in enumerate(word_labels):
@@ -255,7 +303,7 @@ def plot_word_level(
 
     group_colors = {"P1": "#F57C00", "P2": "#7B1FA2", "P3": "#00897B"}
 
-    fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups, texts=word_texts)
+    fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups, texts=use_texts)
 
     if point_embeddings is not None and point_labels is not None:
         _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
@@ -277,6 +325,7 @@ def plot_combined(
     point_full_texts: list[str] | None = None,
     sentence_texts: list[str] | None = None,
     word_texts: list[str] | None = None,
+    simplify_epsilon: float = 0.0,
 ) -> str:
     """Plot both trajectories on the same shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -288,15 +337,28 @@ def plot_combined(
 
     all_embeddings = np.array(sentence_embeddings + word_embeddings)
     reducer = _make_reducer_from_embeddings(all_embeddings, n_components=3)
-    coords = reducer.fit_transform(all_embeddings)
+
+    use_s_texts = sentence_texts
+    if simplify_epsilon > 0 and n_word >= 3:
+        use_w_texts = word_texts if word_texts else word_labels
+        w_keep, word_labels, use_w_texts = simplify_trajectory(
+            np.array(word_embeddings), word_labels, use_w_texts, simplify_epsilon,
+        )
+        kept_embeddings = np.array(
+            list(sentence_embeddings) + [word_embeddings[i] for i in w_keep]
+        )
+    else:
+        use_w_texts = word_texts
+        kept_embeddings = all_embeddings
+
+    coords = reducer.transform(kept_embeddings)
     sent_coords = coords[:n_sent]
     word_coords = coords[n_sent:]
 
     fig = go.Figure()
 
-    # Sentence trajectory
-    if n_sent >= 2:
-        s_customdata = list(zip(sentence_labels, sentence_texts or sentence_labels))
+    if len(sentence_labels) >= 2:
+        s_customdata = list(zip(sentence_labels, use_s_texts or sentence_labels))
         fig.add_trace(go.Scatter3d(
             x=sent_coords[:, 0], y=sent_coords[:, 1], z=sent_coords[:, 2],
             mode="lines+markers+text",
@@ -310,11 +372,11 @@ def plot_combined(
             name="Sentences",
         ))
 
-    # Word trajectory
-    if n_word >= 2:
-        label_every_n = max(1, n_word // 15)
-        display_labels = [word_labels[i] if i % label_every_n == 0 or i == n_word - 1 else "" for i in range(n_word)]
-        w_customdata = list(zip(word_labels, word_texts or word_labels))
+    if len(word_labels) >= 2:
+        n_w = len(word_labels)
+        label_every_n = max(1, n_w // 15)
+        display_labels = [word_labels[i] if i % label_every_n == 0 or i == n_w - 1 else "" for i in range(n_w)]
+        w_customdata = list(zip(word_labels, use_w_texts or word_labels))
 
         fig.add_trace(go.Scatter3d(
             x=word_coords[:, 0], y=word_coords[:, 1], z=word_coords[:, 2],
@@ -360,6 +422,7 @@ def plot_common(
     point_full_texts: list[str] | None = None,
     sentence_texts: list[str] | None = None,
     word_texts: list[str] | None = None,
+    simplify_epsilon: float = 0.0,
 ) -> str:
     """Plot all trajectories from multiple prompts on one shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -371,33 +434,41 @@ def plot_common(
 
     all_embeddings = np.array(sentence_embeddings + word_embeddings)
     reducer = _make_reducer_from_embeddings(all_embeddings, n_components=3)
-    coords = reducer.fit_transform(all_embeddings)
-
-    sent_coords = coords[:n_sent]
-    word_coords = coords[n_sent:]
 
     p1_sent = [i for i, l in enumerate(sentence_labels) if l.startswith("P1-")]
     p2_sent = [i for i, l in enumerate(sentence_labels) if l.startswith("P2-")]
     p1_word = [i for i, l in enumerate(word_labels) if l.startswith("P1-")]
     p2_word = [i for i, l in enumerate(word_labels) if l.startswith("P2-")]
 
-    fig = go.Figure()
-
-    configs = [
-        (p1_sent, sent_coords, "P1-Sentences", "#1976D2", 4, 6, sentence_labels, sentence_texts),
-        (p2_sent, sent_coords, "P2-Sentences", "#388E3C", 4, 6, sentence_labels, sentence_texts),
-        (p1_word, word_coords, "P1-Words", "#F57C00", 2, 3, word_labels, word_texts),
-        (p2_word, word_coords, "P2-Words", "#7B1FA2", 2, 3, word_labels, word_texts),
-    ]
-
-    for indices, all_coords, name, color, line_w, marker_size, labels, texts in configs:
-        if len(indices) < 2:
-            continue
-        pts = all_coords[indices]
+    def _simplify_group(indices: list[int], embeddings_list: list[list[float]], labels: list[str], texts: list[str] | None, do_simplify: bool = True) -> tuple[np.ndarray, list[str], list[str]]:
+        if not indices:
+            return np.empty((0, 3)), [], []
+        group_embs = np.array([embeddings_list[i] for i in indices])
         group_labels = [labels[i] for i in indices]
         group_texts = [texts[i] if texts else labels[i] for i in indices]
+        if do_simplify and simplify_epsilon > 0 and len(group_embs) >= 3:
+            keep_idx, group_labels, group_texts = simplify_trajectory(
+                group_embs, group_labels, group_texts, simplify_epsilon,
+            )
+            coords = reducer.transform(group_embs[keep_idx])
+        else:
+            coords = reducer.transform(group_embs)
+        return coords, group_labels, group_texts
 
-        # Trajectory line
+    configs = [
+        (p1_sent, sentence_embeddings, "P1-Sentences", "#1976D2", 4, 6, sentence_labels, sentence_texts, False),
+        (p2_sent, sentence_embeddings, "P2-Sentences", "#388E3C", 4, 6, sentence_labels, sentence_texts, False),
+        (p1_word, word_embeddings, "P1-Words", "#F57C00", 2, 3, word_labels, word_texts, True),
+        (p2_word, word_embeddings, "P2-Words", "#7B1FA2", 2, 3, word_labels, word_texts, True),
+    ]
+
+    fig = go.Figure()
+
+    for indices, embs, name, color, line_w, marker_size, labels, texts, do_simplify in configs:
+        pts, group_labels, group_texts = _simplify_group(indices, embs, labels, texts, do_simplify)
+        if len(group_labels) < 2:
+            continue
+
         fig.add_trace(go.Scatter3d(
             x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
             mode="lines",
@@ -407,7 +478,6 @@ def plot_common(
             hoverinfo="skip",
         ))
 
-        # Markers
         fig.add_trace(go.Scatter3d(
             x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
             mode="markers",
@@ -418,10 +488,9 @@ def plot_common(
             showlegend=False,
         ))
 
-        # Labels
         is_word = "Words" in name
-        step = max(1, len(indices) // 10) if is_word else 1
-        display_labels = [group_labels[j] if j % step == 0 or j == len(indices) - 1 else "" for j in range(len(indices))]
+        step = max(1, len(group_labels) // 10) if is_word else 1
+        display_labels = [group_labels[j] if j % step == 0 or j == len(group_labels) - 1 else "" for j in range(len(group_labels))]
         fig.add_trace(go.Scatter3d(
             x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
             mode="text",

@@ -141,6 +141,12 @@ def main():
         help="Radius for point circles on graphs (default: 0.5)",
     )
     parser.add_argument(
+        "--simplify-epsilon",
+        type=float,
+        default=0.0,
+        help="Simplify trajectory by merging points with cosine similarity > threshold (0 = disabled, e.g. 0.95)",
+    )
+    parser.add_argument(
         "--timeout",
         type=float,
         default=240.0,
@@ -220,6 +226,7 @@ def main():
         output_path=os.path.join(args.output_dir, "prompt1_combined.html"),
         sentence_texts=result1["sentences"],
         word_texts=result1["words"],
+        simplify_epsilon=args.simplify_epsilon,
         **pp_kwargs,
     )
     plot_sentence_level(
@@ -227,6 +234,7 @@ def main():
         s_labels1,
         output_path=os.path.join(args.output_dir, "prompt1_sentence.html"),
         sentence_texts=result1["sentences"],
+        simplify_epsilon=args.simplify_epsilon,
         **pp_kwargs,
     )
     if result1["word_embeddings"]:
@@ -235,6 +243,7 @@ def main():
             w_labels1,
             output_path=os.path.join(args.output_dir, "prompt1_word.html"),
             word_texts=result1["words"],
+            simplify_epsilon=args.simplify_epsilon,
             **pp_kwargs,
         )
 
@@ -254,6 +263,7 @@ def main():
             output_path=os.path.join(args.output_dir, "prompt2_combined.html"),
             sentence_texts=result2["sentences"],
             word_texts=result2["words"],
+            simplify_epsilon=args.simplify_epsilon,
             **pp_kwargs,
         )
         plot_sentence_level(
@@ -261,6 +271,7 @@ def main():
             s_labels2,
             output_path=os.path.join(args.output_dir, "prompt2_sentence.html"),
             sentence_texts=result2["sentences"],
+            simplify_epsilon=args.simplify_epsilon,
             **pp_kwargs,
         )
         if result2["word_embeddings"]:
@@ -269,6 +280,7 @@ def main():
                 w_labels2,
                 output_path=os.path.join(args.output_dir, "prompt2_word.html"),
                 word_texts=result2["words"],
+                simplify_epsilon=args.simplify_epsilon,
                 **pp_kwargs,
             )
 
@@ -290,6 +302,7 @@ def main():
             output_path=os.path.join(args.output_dir, "common.html"),
             sentence_texts=all_s_texts,
             word_texts=all_w_texts,
+            simplify_epsilon=args.simplify_epsilon,
             **pp_kwargs,
         )
 
@@ -298,6 +311,7 @@ def main():
             all_s_labels,
             output_path=os.path.join(args.output_dir, "common_sentence.html"),
             sentence_texts=all_s_texts,
+            simplify_epsilon=args.simplify_epsilon,
             **pp_kwargs,
         )
 
@@ -307,6 +321,7 @@ def main():
                 all_w_labels,
                 output_path=os.path.join(args.output_dir, "common_word.html"),
                 word_texts=all_w_texts,
+                simplify_epsilon=args.simplify_epsilon,
                 **pp_kwargs,
             )
 
