@@ -120,6 +120,7 @@ def _build_figure(
     group_color_map: dict[str, str],
     title: str,
     prompt_groups: dict[str, list[int]],
+    texts: list[str] | None = None,
 ) -> go.Figure:
     """Build a 3D scatter figure with trajectory lines for each group."""
     fig = go.Figure()
@@ -143,12 +144,13 @@ def _build_figure(
 
         # Scatter points
         group_labels = [labels[i] for i in indices]
+        group_texts = [texts[i] if texts else labels[i] for i in indices]
         fig.add_trace(go.Scatter3d(
             x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
             mode="markers",
             marker=dict(size=5, color=color, line=dict(width=0.5, color="white")),
-            text=group_labels,
-            hovertemplate="%{text}<extra></extra>",
+            customdata=list(zip(group_labels, group_texts)),
+            hovertemplate="<b>%{customdata[0]}</b> — %{customdata[1]}<br>x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}<extra></extra>",
             name=f"{group_label} points",
             showlegend=False,
         ))
@@ -195,6 +197,7 @@ def plot_sentence_level(
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
+    sentence_texts: list[str] | None = None,
 ) -> str:
     """Plot sentence-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -214,7 +217,7 @@ def plot_sentence_level(
 
     group_colors = {"P1": "#1976D2", "P2": "#388E3C", "P3": "#7B1FA2"}
 
-    fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups)
+    fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups, texts=sentence_texts)
 
     if point_embeddings is not None and point_labels is not None:
         _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
@@ -232,6 +235,7 @@ def plot_word_level(
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
+    word_texts: list[str] | None = None,
 ) -> str:
     """Plot word-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
@@ -251,7 +255,7 @@ def plot_word_level(
 
     group_colors = {"P1": "#F57C00", "P2": "#7B1FA2", "P3": "#00897B"}
 
-    fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups)
+    fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups, texts=word_texts)
 
     if point_embeddings is not None and point_labels is not None:
         _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius, point_full_texts)
@@ -271,6 +275,8 @@ def plot_combined(
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
+    sentence_texts: list[str] | None = None,
+    word_texts: list[str] | None = None,
 ) -> str:
     """Plot both trajectories on the same shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -290,6 +296,7 @@ def plot_combined(
 
     # Sentence trajectory
     if n_sent >= 2:
+        s_customdata = list(zip(sentence_labels, sentence_texts or sentence_labels))
         fig.add_trace(go.Scatter3d(
             x=sent_coords[:, 0], y=sent_coords[:, 1], z=sent_coords[:, 2],
             mode="lines+markers+text",
@@ -298,14 +305,16 @@ def plot_combined(
             text=sentence_labels,
             textposition="top center",
             textfont=dict(size=9, color="#1976D2"),
+            customdata=s_customdata,
+            hovertemplate="<b>%{customdata[0]}</b> — %{customdata[1]}<br>x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}<extra>Sentence</extra>",
             name="Sentences",
-            hovertemplate="%{text}<extra>Sentence</extra>",
         ))
 
     # Word trajectory
     if n_word >= 2:
         label_every_n = max(1, n_word // 15)
         display_labels = [word_labels[i] if i % label_every_n == 0 or i == n_word - 1 else "" for i in range(n_word)]
+        w_customdata = list(zip(word_labels, word_texts or word_labels))
 
         fig.add_trace(go.Scatter3d(
             x=word_coords[:, 0], y=word_coords[:, 1], z=word_coords[:, 2],
@@ -315,8 +324,9 @@ def plot_combined(
             text=display_labels,
             textposition="top center",
             textfont=dict(size=7, color="#F57C00"),
+            customdata=w_customdata,
+            hovertemplate="<b>%{customdata[0]}</b> — %{customdata[1]}<br>x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}<extra>Word</extra>",
             name="Words",
-            hovertemplate="%{text}<extra>Word</extra>",
         ))
 
     fig.update_layout(
@@ -348,6 +358,8 @@ def plot_common(
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
     point_full_texts: list[str] | None = None,
+    sentence_texts: list[str] | None = None,
+    word_texts: list[str] | None = None,
 ) -> str:
     """Plot all trajectories from multiple prompts on one shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
@@ -372,17 +384,18 @@ def plot_common(
     fig = go.Figure()
 
     configs = [
-        (p1_sent, sent_coords, "P1-Sentences", "#1976D2", 4, 6, sentence_labels),
-        (p2_sent, sent_coords, "P2-Sentences", "#388E3C", 4, 6, sentence_labels),
-        (p1_word, word_coords, "P1-Words", "#F57C00", 2, 3, word_labels),
-        (p2_word, word_coords, "P2-Words", "#7B1FA2", 2, 3, word_labels),
+        (p1_sent, sent_coords, "P1-Sentences", "#1976D2", 4, 6, sentence_labels, sentence_texts),
+        (p2_sent, sent_coords, "P2-Sentences", "#388E3C", 4, 6, sentence_labels, sentence_texts),
+        (p1_word, word_coords, "P1-Words", "#F57C00", 2, 3, word_labels, word_texts),
+        (p2_word, word_coords, "P2-Words", "#7B1FA2", 2, 3, word_labels, word_texts),
     ]
 
-    for indices, all_coords, name, color, line_w, marker_size, labels in configs:
+    for indices, all_coords, name, color, line_w, marker_size, labels, texts in configs:
         if len(indices) < 2:
             continue
         pts = all_coords[indices]
         group_labels = [labels[i] for i in indices]
+        group_texts = [texts[i] if texts else labels[i] for i in indices]
 
         # Trajectory line
         fig.add_trace(go.Scatter3d(
@@ -399,8 +412,8 @@ def plot_common(
             x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
             mode="markers",
             marker=dict(size=marker_size, color=color, line=dict(width=0.5, color="white")),
-            text=group_labels,
-            hovertemplate="%{text}<extra></extra>",
+            customdata=list(zip(group_labels, group_texts)),
+            hovertemplate="<b>%{customdata[0]}</b> — %{customdata[1]}<br>x: %{x:.3f}<br>y: %{y:.3f}<br>z: %{z:.3f}<extra></extra>",
             name=f"{name} pts",
             showlegend=False,
         ))

@@ -218,12 +218,15 @@ def main():
         s_labels1,
         w_labels1,
         output_path=os.path.join(args.output_dir, "prompt1_combined.html"),
+        sentence_texts=result1["sentences"],
+        word_texts=result1["words"],
         **pp_kwargs,
     )
     plot_sentence_level(
         result1["sentence_embeddings"],
         s_labels1,
         output_path=os.path.join(args.output_dir, "prompt1_sentence.html"),
+        sentence_texts=result1["sentences"],
         **pp_kwargs,
     )
     if result1["word_embeddings"]:
@@ -231,6 +234,7 @@ def main():
             result1["word_embeddings"],
             w_labels1,
             output_path=os.path.join(args.output_dir, "prompt1_word.html"),
+            word_texts=result1["words"],
             **pp_kwargs,
         )
 
@@ -248,12 +252,15 @@ def main():
             s_labels2,
             w_labels2,
             output_path=os.path.join(args.output_dir, "prompt2_combined.html"),
+            sentence_texts=result2["sentences"],
+            word_texts=result2["words"],
             **pp_kwargs,
         )
         plot_sentence_level(
             result2["sentence_embeddings"],
             s_labels2,
             output_path=os.path.join(args.output_dir, "prompt2_sentence.html"),
+            sentence_texts=result2["sentences"],
             **pp_kwargs,
         )
         if result2["word_embeddings"]:
@@ -261,6 +268,7 @@ def main():
                 result2["word_embeddings"],
                 w_labels2,
                 output_path=os.path.join(args.output_dir, "prompt2_word.html"),
+                word_texts=result2["words"],
                 **pp_kwargs,
             )
 
@@ -271,6 +279,8 @@ def main():
                        [f"P2-S{i+1}" for i in range(len(result2["sentences"]))]
         all_w_labels = [f"P1-W{i+1}" for i in range(len(result1["words"]))] + \
                        [f"P2-W{i+1}" for i in range(len(result2["words"]))]
+        all_s_texts = result1["sentences"] + result2["sentences"]
+        all_w_texts = result1["words"] + result2["words"]
 
         plot_common(
             result1["sentence_embeddings"] + result2["sentence_embeddings"],
@@ -278,6 +288,8 @@ def main():
             all_s_labels,
             all_w_labels,
             output_path=os.path.join(args.output_dir, "common.html"),
+            sentence_texts=all_s_texts,
+            word_texts=all_w_texts,
             **pp_kwargs,
         )
 
@@ -285,6 +297,7 @@ def main():
             result1["sentence_embeddings"] + result2["sentence_embeddings"],
             all_s_labels,
             output_path=os.path.join(args.output_dir, "common_sentence.html"),
+            sentence_texts=all_s_texts,
             **pp_kwargs,
         )
 
@@ -293,6 +306,7 @@ def main():
                 result1["word_embeddings"] + result2["word_embeddings"],
                 all_w_labels,
                 output_path=os.path.join(args.output_dir, "common_word.html"),
+                word_texts=all_w_texts,
                 **pp_kwargs,
             )
 
