@@ -7,13 +7,14 @@ from openai import OpenAI, APIConnectionError, APITimeoutError, APIStatusError
 class LMStudioClient:
     """Client for LMStudio's OpenAI-compatible embedding endpoint."""
 
-    def __init__(self, base_url: str = "http://localhost:1234/v1", model: str = "qwen-0.6b"):
+    def __init__(self, base_url: str = "http://localhost:1234/v1", model: str = "qwen-0.6b", timeout: float = 240.0):
         self.base_url = base_url
         self.model = model
+        self.timeout = timeout
         self.client = OpenAI(
             base_url=base_url,
             api_key="lm-studio",  # LMStudio does not require a real key
-            timeout=30.0,
+            timeout=timeout,
         )
 
     def _prepare_text(self, text: str) -> str:
@@ -38,7 +39,7 @@ class LMStudioClient:
             raise
         except APITimeoutError:
             print(
-                f"Error: Request to LMStudio timed out after 30s. "
+                f"Error: Request to LMStudio timed out after {self.timeout}s. "
                 "The server may be overloaded.",
                 file=sys.stderr,
             )
@@ -81,7 +82,7 @@ class LMStudioClient:
                     raise
                 except APITimeoutError:
                     print(
-                        f"Error: Request to LMStudio timed out after 30s. "
+                        f"Error: Request to LMStudio timed out after {self.timeout}s. "
                         "The server may be overloaded.",
                         file=sys.stderr,
                     )

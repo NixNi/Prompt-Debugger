@@ -1,71 +1,182 @@
-"""UMAP + matplotlib visualization for embedding trajectories."""
+"""UMAP + plotly 3D interactive visualization for embedding trajectories."""
 
 from __future__ import annotations
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")  # Non-interactive backend for file output
-import matplotlib.pyplot as plt
-from matplotlib.patches import Circle
-import umap
+import plotly.graph_objects as go
 
 
 POINT_COLORS = ["#E53935", "#D81B60", "#00897B", "#FF8F00"]
 
 
-def _draw_points(
-    ax: plt.Axes,
-    point_coords_2d: np.ndarray,
-    point_labels: list[str],
-    point_radius: float,
-) -> list:
-    """Draw point overlays as labeled stars with transparent radius circles."""
-    from matplotlib.lines import Line2D
+def _make_reducer(n_points: int, n_components: int = 3):
+    """Create a PCA or UMAP reducer based on data characteristics."""
+    unique_ratio = len(np.unique(np.random.rand(n_points, 3), axis=0)) / max(n_points, 1)
+    use_pca = n_points <= 10 or unique_ratio < 0.5
 
-    import matplotlib.colors as mcolors
-    handles = []
-    for i, (x, y, label) in enumerate(zip(point_coords_2d[:, 0], point_coords_2d[:, 1], point_labels)):
-        color = POINT_COLORS[i % len(POINT_COLORS)]
-
-        # RGBA for independent face/edge alphas
-        face_rgba = list(mcolors.to_rgba(color))
-        face_rgba[3] = 0.1
-        edge_rgba = list(mcolors.to_rgba(color))
-        edge_rgba[3] = 0.5
-        circle = Circle((x, y), point_radius, facecolor=face_rgba, edgecolor=edge_rgba, linestyle="--", linewidth=1.5, zorder=1)
-        ax.add_patch(circle)
-
-        # Star marker
-        ax.scatter([x], [y], c=color, marker="*", s=200, edgecolors="white", linewidths=0.5, zorder=5)
-
-        # Label annotation
-        ax.annotate(
-            label,
-            (x, y),
-            fontsize=9,
-            fontweight="bold",
-            ha="center",
-            va="bottom",
-            xytext=(0, 12),
-            textcoords="offset points",
-            zorder=6,
-            color=color,
+    if use_pca:
+        from sklearn.decomposition import PCA
+        return PCA(n_components=n_components, random_state=42)
+    else:
+        import umap
+        n_neighbors = min(15, n_points - 1)
+        return umap.UMAP(
+            n_components=n_components,
+            n_neighbors=n_neighbors,
+            min_dist=0.1,
+            metric="cosine",
+            random_state=42,
         )
 
-        handles.append(Line2D([0], [0], marker="*", color="w", markerfacecolor=color, markersize=12, label=label))
 
-    return handles
+def _make_reducer_from_embeddings(embeddings: list[list[float]], n_components: int = 3):
+    """Create a reducer fitted to the given embeddings."""
+    embeddings_array = np.array(embeddings)
+    n_points = len(embeddings_array)
+    unique_ratio = len(np.unique(embeddings_array, axis=0)) / n_points
+    use_pca = n_points <= 10 or unique_ratio < 0.5
+
+    if use_pca:
+        from sklearn.decomposition import PCA
+        reducer = PCA(n_components=n_components, random_state=42)
+    else:
+        import umap
+        n_neighbors = min(15, n_points - 1)
+        reducer = umap.UMAP(
+            n_components=n_components,
+            n_neighbors=n_neighbors,
+            min_dist=0.1,
+            metric="cosine",
+            random_state=42,
+        )
+    reducer.fit(embeddings_array)
+    return reducer
+
+
+def _add_point_overlay(
+    fig: go.Figure,
+    reducer,
+    point_embeddings: list[list[float]],
+    point_labels: list[str],
+    point_radius: float,
+) -> None:
+    """Add point overlays as labeled stars with transparent radius spheres."""
+    point_coords = reducer.transform(np.array(point_embeddings))
+    for i, (x, y, z, label) in enumerate(
+        zip(point_coords[:, 0], point_coords[:, 1], point_coords[:, 2], point_labels)
+    ):
+        color = POINT_COLORS[i % len(POINT_COLORS)]
+
+        # Transparent sphere for radius
+        u = np.linspace(0, 2 * np.pi, 16)
+        v = np.linspace(0, np.pi, 16)
+        sx = x + point_radius * np.outer(np.cos(u), np.sin(v))
+        sy = y + point_radius * np.outer(np.sin(u), np.sin(v))
+        sz = z + point_radius * np.outer(np.ones(np.size(u)), np.cos(v))
+        fig.add_trace(go.Surface(
+            x=sx, y=sy, z=sz,
+            colorscale=[[0, color], [1, color]],
+            opacity=0.15,
+            showscale=False,
+            name=label,
+            showlegend=True,
+            hoverinfo="skip",
+        ))
+
+        # Star marker
+        fig.add_trace(go.Scatter3d(
+            x=[x], y=[y], z=[z],
+            mode="markers+text",
+            marker=dict(size=8, color=color, symbol="diamond", line=dict(width=1, color="white")),
+            text=[label],
+            textposition="top center",
+            name=f"Point: {label}",
+            showlegend=True,
+        ))
+
+
+def _build_figure(
+    coords_3d: np.ndarray,
+    labels: list[str],
+    group_color_map: dict[str, str],
+    title: str,
+    prompt_groups: dict[str, list[int]],
+) -> go.Figure:
+    """Build a 3D scatter figure with trajectory lines for each group."""
+    fig = go.Figure()
+
+    for group, indices in prompt_groups.items():
+        if len(indices) < 2:
+            continue
+        pts = coords_3d[indices]
+        color = group_color_map.get(group, "gray")
+        group_label = group
+
+        # Trajectory line
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="lines",
+            line=dict(color=color, width=4),
+            name=group_label,
+            showlegend=True,
+            hoverinfo="skip",
+        ))
+
+        # Scatter points
+        group_labels = [labels[i] for i in indices]
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="markers",
+            marker=dict(size=5, color=color, line=dict(width=0.5, color="white")),
+            text=group_labels,
+            hovertemplate="%{text}<extra></extra>",
+            name=f"{group_label} points",
+            showlegend=False,
+        ))
+
+        # Annotations for each point
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="text",
+            text=group_labels,
+            textposition="top center",
+            textfont=dict(size=9, color=color),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
+
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=16)),
+        scene=dict(
+            xaxis_title="Component 1",
+            yaxis_title="Component 2",
+            zaxis_title="Component 3",
+        ),
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor="rgba(255,255,255,0.8)",
+        ),
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+    return fig
+
+
+def _get_group_prefix(label: str) -> str:
+    return label.split("-")[0] if "-" in label else "P1"
 
 
 def plot_sentence_level(
     cumulative_embeddings: list[list[float]],
     sentence_labels: list[str],
-    output_path: str = "sentence_level.png",
+    output_path: str = "sentence_level.html",
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
 ) -> str:
-    """Plot sentence-level cumulative embedding trajectory."""
+    """Plot sentence-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
     n_points = len(embeddings_array)
 
@@ -73,76 +184,22 @@ def plot_sentence_level(
         print("Warning: Need at least 2 sentences to create a trajectory plot.")
         return output_path
 
-    unique_ratio = len(np.unique(embeddings_array, axis=0)) / n_points
-    use_pca = n_points <= 10 or unique_ratio < 0.5
+    reducer = _make_reducer_from_embeddings(cumulative_embeddings, n_components=3)
+    coords = reducer.transform(embeddings_array)
 
-    if use_pca:
-        from sklearn.decomposition import PCA
-        reducer = PCA(n_components=2, random_state=42)
-    else:
-        n_neighbors = min(15, n_points - 1)
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=42,
-        )
-
-    coords = reducer.fit_transform(embeddings_array)
-
-    fig, ax = plt.subplots(figsize=(10, 8))
-
-    prompt_groups = {}
+    prompt_groups: dict[str, list[int]] = {}
     for i, label in enumerate(sentence_labels):
-        prefix = label.split("-")[0] if "-" in label else "P1"
+        prefix = _get_group_prefix(label)
         prompt_groups.setdefault(prefix, []).append(i)
 
     group_colors = {"P1": "#1976D2", "P2": "#388E3C", "P3": "#7B1FA2"}
 
-    for group, indices in prompt_groups.items():
-        if len(indices) < 2:
-            continue
-        pts = coords[indices]
-        color = group_colors.get(group, "gray")
-        ax.plot(pts[:, 0], pts[:, 1], color=color, alpha=0.5, linewidth=1.5, zorder=1)
+    fig = _build_figure(coords, sentence_labels, group_colors, "Sentence-level embedding trajectory (3D)", prompt_groups)
 
-    all_colors = [group_colors.get(label.split("-")[0] if "-" in label else "P1", "#1976D2") for label in sentence_labels]
-    ax.scatter(coords[:, 0], coords[:, 1], c=all_colors, s=80, edgecolors="white", linewidths=0.5, zorder=2)
-
-    # Annotate each point
-    for i, (x, y, label) in enumerate(zip(coords[:, 0], coords[:, 1], sentence_labels)):
-        ax.annotate(
-            label,
-            (x, y),
-            fontsize=8,
-            ha="center",
-            va="bottom",
-            xytext=(0, 8),
-            textcoords="offset points",
-            zorder=3,
-        )
-
-    ax.set_title("Sentence-level embedding trajectory", fontsize=14, fontweight="bold")
-    ax.set_xlabel("Component 1", fontsize=12)
-    ax.set_ylabel("Component 2", fontsize=12)
-
-    from matplotlib.lines import Line2D
-    legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c, markersize=8, label=g)
-                       for g, c in group_colors.items() if g in prompt_groups]
-
-    # Point overlay
     if point_embeddings is not None and point_labels is not None:
-        point_coords = reducer.transform(np.array(point_embeddings))
-        point_handles = _draw_points(ax, point_coords, point_labels, point_radius)
-        legend_elements.extend(point_handles)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
 
-    if legend_elements:
-        ax.legend(handles=legend_elements, loc="best", fontsize=9)
-
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    fig.write_html(output_path)
     print(f"Saved sentence-level plot to: {output_path}")
     return output_path
 
@@ -150,12 +207,12 @@ def plot_sentence_level(
 def plot_word_level(
     cumulative_embeddings: list[list[float]],
     word_labels: list[str],
-    output_path: str = "word_level.png",
+    output_path: str = "word_level.html",
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
 ) -> str:
-    """Plot word-level cumulative embedding trajectory."""
+    """Plot word-level cumulative embedding trajectory in 3D."""
     embeddings_array = np.array(cumulative_embeddings)
     n_points = len(embeddings_array)
 
@@ -163,93 +220,22 @@ def plot_word_level(
         print("Warning: Need at least 2 words to create a trajectory plot.")
         return output_path
 
-    unique_ratio = len(np.unique(embeddings_array, axis=0)) / n_points
-    use_pca = n_points <= 10 or unique_ratio < 0.5
+    reducer = _make_reducer_from_embeddings(cumulative_embeddings, n_components=3)
+    coords = reducer.transform(embeddings_array)
 
-    if use_pca:
-        from sklearn.decomposition import PCA
-        reducer = PCA(n_components=2, random_state=42)
-    else:
-        n_neighbors = min(15, n_points - 1)
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=42,
-        )
-
-    coords = reducer.fit_transform(embeddings_array)
-
-    fig, ax = plt.subplots(figsize=(10, 8))
-
-    prompt_groups = {}
+    prompt_groups: dict[str, list[int]] = {}
     for i, label in enumerate(word_labels):
-        prefix = label.split("-")[0] if "-" in label else "P1"
+        prefix = _get_group_prefix(label)
         prompt_groups.setdefault(prefix, []).append(i)
 
     group_colors = {"P1": "#F57C00", "P2": "#7B1FA2", "P3": "#00897B"}
 
-    for group, indices in prompt_groups.items():
-        if len(indices) < 2:
-            continue
-        pts = coords[indices]
-        color = group_colors.get(group, "gray")
-        ax.plot(pts[:, 0], pts[:, 1], color=color, alpha=0.4, linewidth=0.8, zorder=1)
+    fig = _build_figure(coords, word_labels, group_colors, "Word-level embedding trajectory (3D)", prompt_groups)
 
-    all_colors = [group_colors.get(label.split("-")[0] if "-" in label else "P1", "#F57C00") for label in word_labels]
-    ax.scatter(coords[:, 0], coords[:, 1], c=all_colors, s=30, edgecolors="white", linewidths=0.3, zorder=2)
-
-    # Auto-calculate label stride to avoid overlap
-    label_every_n = max(1, n_points // 20)
-
-    # Annotate every Nth word
-    for i in range(0, n_points, label_every_n):
-        x, y = coords[i, 0], coords[i, 1]
-        ax.annotate(
-            word_labels[i],
-            (x, y),
-            fontsize=6,
-            ha="center",
-            va="bottom",
-            xytext=(0, 5),
-            textcoords="offset points",
-            zorder=3,
-        )
-    # Always label the last point
-    if (n_points - 1) % label_every_n != 0:
-        x, y = coords[-1, 0], coords[-1, 1]
-        ax.annotate(
-            word_labels[-1],
-            (x, y),
-            fontsize=6,
-            ha="center",
-            va="bottom",
-            xytext=(0, 5),
-            textcoords="offset points",
-            zorder=3,
-        )
-
-    ax.set_title("Word-level embedding trajectory", fontsize=14, fontweight="bold")
-    ax.set_xlabel("Component 1", fontsize=12)
-    ax.set_ylabel("Component 2", fontsize=12)
-
-    from matplotlib.lines import Line2D
-    legend_elements = [Line2D([0], [0], marker='o', color='w', markerfacecolor=c, markersize=6, label=g)
-                       for g, c in group_colors.items() if g in prompt_groups]
-
-    # Point overlay
     if point_embeddings is not None and point_labels is not None:
-        point_coords = reducer.transform(np.array(point_embeddings))
-        point_handles = _draw_points(ax, point_coords, point_labels, point_radius)
-        legend_elements.extend(point_handles)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
 
-    if legend_elements:
-        ax.legend(handles=legend_elements, loc="best", fontsize=9)
-
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    fig.write_html(output_path)
     print(f"Saved word-level plot to: {output_path}")
     return output_path
 
@@ -259,12 +245,12 @@ def plot_combined(
     word_embeddings: list[list[float]],
     sentence_labels: list[str],
     word_labels: list[str],
-    output_path: str = "combined.png",
+    output_path: str = "combined.html",
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
 ) -> str:
-    """Plot both trajectories on the same UMAP space."""
+    """Plot both trajectories on the same shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
     n_word = len(word_embeddings)
 
@@ -273,56 +259,59 @@ def plot_combined(
         return output_path
 
     all_embeddings = np.array(sentence_embeddings + word_embeddings)
-    n_total = len(all_embeddings)
-    n_neighbors = min(15, n_total - 1) if n_total > 2 else 2
-
-    if n_total <= 5:
-        from sklearn.decomposition import PCA
-        reducer = PCA(n_components=2, random_state=42)
-    else:
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=42,
-        )
-
+    reducer = _make_reducer_from_embeddings(all_embeddings, n_components=3)
     coords = reducer.fit_transform(all_embeddings)
     sent_coords = coords[:n_sent]
     word_coords = coords[n_sent:]
 
-    fig, ax = plt.subplots(figsize=(12, 9))
+    fig = go.Figure()
 
+    # Sentence trajectory
     if n_sent >= 2:
-        ax.plot(sent_coords[:, 0], sent_coords[:, 1], color="#2196F3", alpha=0.6, linewidth=2, zorder=1)
-        ax.scatter(sent_coords[:, 0], sent_coords[:, 1], c="#1976D2", s=100, edgecolors="white", linewidths=1, zorder=3, label="Sentences")
-        for i, (x, y, label) in enumerate(zip(sent_coords[:, 0], sent_coords[:, 1], sentence_labels)):
-            ax.annotate(label, (x, y), fontsize=9, fontweight="bold", ha="center", va="bottom", xytext=(0, 10), textcoords="offset points", zorder=4)
+        fig.add_trace(go.Scatter3d(
+            x=sent_coords[:, 0], y=sent_coords[:, 1], z=sent_coords[:, 2],
+            mode="lines+markers+text",
+            line=dict(color="#2196F3", width=4),
+            marker=dict(size=6, color="#1976D2", line=dict(width=0.5, color="white")),
+            text=sentence_labels,
+            textposition="top center",
+            textfont=dict(size=9, color="#1976D2"),
+            name="Sentences",
+            hovertemplate="%{text}<extra>Sentence</extra>",
+        ))
 
+    # Word trajectory
     if n_word >= 2:
-        ax.plot(word_coords[:, 0], word_coords[:, 1], color="#FF9800", alpha=0.4, linewidth=1, zorder=1)
-        ax.scatter(word_coords[:, 0], word_coords[:, 1], c="#F57C00", s=25, edgecolors="white", linewidths=0.3, zorder=2, label="Words")
         label_every_n = max(1, n_word // 15)
-        for i in range(0, n_word, label_every_n):
-            ax.annotate(word_labels[i], (word_coords[i, 0], word_coords[i, 1]), fontsize=6, ha="center", va="bottom", xytext=(0, 5), textcoords="offset points", zorder=4)
-        if (n_word - 1) % label_every_n != 0:
-            ax.annotate(word_labels[-1], (word_coords[-1, 0], word_coords[-1, 1]), fontsize=6, ha="center", va="bottom", xytext=(0, 5), textcoords="offset points", zorder=4)
+        display_labels = [word_labels[i] if i % label_every_n == 0 or i == n_word - 1 else "" for i in range(n_word)]
 
-    ax.set_title("Combined embedding trajectory (shared UMAP space)", fontsize=14, fontweight="bold")
-    ax.set_xlabel("Component 1", fontsize=12)
-    ax.set_ylabel("Component 2", fontsize=12)
+        fig.add_trace(go.Scatter3d(
+            x=word_coords[:, 0], y=word_coords[:, 1], z=word_coords[:, 2],
+            mode="lines+markers+text",
+            line=dict(color="#FF9800", width=2),
+            marker=dict(size=3, color="#F57C00", line=dict(width=0.3, color="white")),
+            text=display_labels,
+            textposition="top center",
+            textfont=dict(size=7, color="#F57C00"),
+            name="Words",
+            hovertemplate="%{text}<extra>Word</extra>",
+        ))
 
-    # Point overlay
+    fig.update_layout(
+        title=dict(text="Combined embedding trajectory — shared 3D UMAP space", font=dict(size=16)),
+        scene=dict(
+            xaxis_title="Component 1",
+            yaxis_title="Component 2",
+            zaxis_title="Component 3",
+        ),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)"),
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+
     if point_embeddings is not None and point_labels is not None:
-        point_coords = reducer.transform(np.array(point_embeddings))
-        _draw_points(ax, point_coords, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
 
-    ax.legend(loc="best", fontsize=10)
-
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    fig.write_html(output_path)
     print(f"Saved combined plot to: {output_path}")
     return output_path
 
@@ -332,12 +321,12 @@ def plot_common(
     word_embeddings: list[list[float]],
     sentence_labels: list[str],
     word_labels: list[str],
-    output_path: str = "common.png",
+    output_path: str = "common.html",
     point_embeddings: list[list[float]] | None = None,
     point_labels: list[str] | None = None,
     point_radius: float = 0.5,
 ) -> str:
-    """Plot all trajectories from multiple prompts on one shared UMAP space."""
+    """Plot all trajectories from multiple prompts on one shared 3D UMAP space."""
     n_sent = len(sentence_embeddings)
     n_word = len(word_embeddings)
 
@@ -346,76 +335,81 @@ def plot_common(
         return output_path
 
     all_embeddings = np.array(sentence_embeddings + word_embeddings)
-    n_total = len(all_embeddings)
-    n_neighbors = min(15, n_total - 1) if n_total > 2 else 2
-
-    if n_total <= 5:
-        from sklearn.decomposition import PCA
-        reducer = PCA(n_components=2, random_state=42)
-    else:
-        reducer = umap.UMAP(
-            n_components=2,
-            n_neighbors=n_neighbors,
-            min_dist=0.1,
-            metric="cosine",
-            random_state=42,
-        )
-
+    reducer = _make_reducer_from_embeddings(all_embeddings, n_components=3)
     coords = reducer.fit_transform(all_embeddings)
+
+    sent_coords = coords[:n_sent]
+    word_coords = coords[n_sent:]
 
     p1_sent = [i for i, l in enumerate(sentence_labels) if l.startswith("P1-")]
     p2_sent = [i for i, l in enumerate(sentence_labels) if l.startswith("P2-")]
     p1_word = [i for i, l in enumerate(word_labels) if l.startswith("P1-")]
     p2_word = [i for i, l in enumerate(word_labels) if l.startswith("P2-")]
 
-    sent_coords = coords[:n_sent]
-    word_coords = coords[n_sent:]
+    fig = go.Figure()
 
-    fig, ax = plt.subplots(figsize=(14, 10))
+    configs = [
+        (p1_sent, sent_coords, "P1-Sentences", "#1976D2", 4, 6, sentence_labels),
+        (p2_sent, sent_coords, "P2-Sentences", "#388E3C", 4, 6, sentence_labels),
+        (p1_word, word_coords, "P1-Words", "#F57C00", 2, 3, word_labels),
+        (p2_word, word_coords, "P2-Words", "#7B1FA2", 2, 3, word_labels),
+    ]
 
-    colors = {"P1-sent": "#1976D2", "P1-word": "#F57C00", "P2-sent": "#388E3C", "P2-word": "#7B1FA2"}
-    sizes = {"sent": 100, "word": 25}
-
-    for idx, label_prefix, color, size, is_word in [
-        (p1_sent, "P1-S", colors["P1-sent"], sizes["sent"], False),
-        (p2_sent, "P2-S", colors["P2-sent"], sizes["sent"], False),
-        (p1_word, "P1-W", colors["P1-word"], sizes["word"], True),
-        (p2_word, "P2-W", colors["P2-word"], sizes["word"], True),
-    ]:
-        if len(idx) < 2:
+    for indices, all_coords, name, color, line_w, marker_size, labels in configs:
+        if len(indices) < 2:
             continue
-        pts = sent_coords[idx] if not is_word else word_coords[idx]
-        labels = [sentence_labels[i] if not is_word else word_labels[i] for i in idx]
-        prompt_name = "Prompt 1" if "P1" in label_prefix else "Prompt 2"
-        level = "Words" if is_word else "Sentences"
-        legend_label = f"{prompt_name} {level}"
+        pts = all_coords[indices]
+        group_labels = [labels[i] for i in indices]
 
-        ax.plot(pts[:, 0], pts[:, 1], color=color, alpha=0.5, linewidth=1.5, zorder=1)
-        ax.scatter(pts[:, 0], pts[:, 1], c=color, s=size, edgecolors="white", linewidths=0.5, zorder=3, label=legend_label)
+        # Trajectory line
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="lines",
+            line=dict(color=color, width=line_w),
+            name=name,
+            showlegend=True,
+            hoverinfo="skip",
+        ))
 
-        if not is_word:
-            for x, y, lbl in zip(pts[:, 0], pts[:, 1], labels):
-                ax.annotate(lbl, (x, y), fontsize=8, fontweight="bold", ha="center", va="bottom", xytext=(0, 8), textcoords="offset points", zorder=4)
-        else:
-            step = max(1, len(idx) // 10)
-            for j in range(0, len(idx), step):
-                ax.annotate(labels[j], (pts[j, 0], pts[j, 1]), fontsize=5, ha="center", va="bottom", xytext=(0, 4), textcoords="offset points", zorder=4)
-            if len(idx) % step != 1:
-                ax.annotate(labels[-1], (pts[-1, 0], pts[-1, 1]), fontsize=5, ha="center", va="bottom", xytext=(0, 4), textcoords="offset points", zorder=4)
+        # Markers
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="markers",
+            marker=dict(size=marker_size, color=color, line=dict(width=0.5, color="white")),
+            text=group_labels,
+            hovertemplate="%{text}<extra></extra>",
+            name=f"{name} pts",
+            showlegend=False,
+        ))
 
-    ax.set_title("Common comparison — all trajectories (shared UMAP)", fontsize=14, fontweight="bold")
-    ax.set_xlabel("Component 1", fontsize=12)
-    ax.set_ylabel("Component 2", fontsize=12)
+        # Labels
+        is_word = "Words" in name
+        step = max(1, len(indices) // 10) if is_word else 1
+        display_labels = [group_labels[j] if j % step == 0 or j == len(indices) - 1 else "" for j in range(len(indices))]
+        fig.add_trace(go.Scatter3d(
+            x=pts[:, 0], y=pts[:, 1], z=pts[:, 2],
+            mode="text",
+            text=display_labels,
+            textposition="top center",
+            textfont=dict(size=7 if is_word else 9, color=color),
+            showlegend=False,
+            hoverinfo="skip",
+        ))
 
-    # Point overlay
+    fig.update_layout(
+        title=dict(text="Common comparison — all trajectories (shared 3D UMAP)", font=dict(size=16)),
+        scene=dict(
+            xaxis_title="Component 1",
+            yaxis_title="Component 2",
+            zaxis_title="Component 3",
+        ),
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01, bgcolor="rgba(255,255,255,0.8)"),
+        margin=dict(l=0, r=0, t=50, b=0),
+    )
+
     if point_embeddings is not None and point_labels is not None:
-        point_coords = reducer.transform(np.array(point_embeddings))
-        _draw_points(ax, point_coords, point_labels, point_radius)
+        _add_point_overlay(fig, reducer, point_embeddings, point_labels, point_radius)
 
-    ax.legend(loc="best", fontsize=9)
-
-    plt.tight_layout()
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
-    plt.close(fig)
+    fig.write_html(output_path)
     print(f"Saved common plot to: {output_path}")
     return output_path

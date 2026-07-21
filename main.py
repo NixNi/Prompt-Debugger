@@ -124,6 +124,12 @@ def main():
         default=0.5,
         help="Radius for point circles on graphs (default: 0.5)",
     )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=240.0,
+        help="Timeout in seconds for embedding API requests (default: 240)",
+    )
     args = parser.parse_args()
 
     text1 = read_text_input(args.text, args.file)
@@ -141,7 +147,7 @@ def main():
         sys.exit(1)
 
     os.makedirs(args.output_dir, exist_ok=True)
-    client = LMStudioClient(base_url=args.url, model=args.model)
+    client = LMStudioClient(base_url=args.url, model=args.model, timeout=args.timeout)
 
     point_data = None
     if args.point:
@@ -194,20 +200,20 @@ def main():
         result1["word_embeddings"],
         s_labels1,
         w_labels1,
-        output_path=os.path.join(args.output_dir, "prompt1_combined.png"),
+        output_path=os.path.join(args.output_dir, "prompt1_combined.html"),
         **pp_kwargs,
     )
     plot_sentence_level(
         result1["sentence_embeddings"],
         s_labels1,
-        output_path=os.path.join(args.output_dir, "prompt1_sentence.png"),
+        output_path=os.path.join(args.output_dir, "prompt1_sentence.html"),
         **pp_kwargs,
     )
     if result1["word_embeddings"]:
         plot_word_level(
             result1["word_embeddings"],
             w_labels1,
-            output_path=os.path.join(args.output_dir, "prompt1_word.png"),
+            output_path=os.path.join(args.output_dir, "prompt1_word.html"),
             **pp_kwargs,
         )
 
@@ -224,20 +230,20 @@ def main():
             result2["word_embeddings"],
             s_labels2,
             w_labels2,
-            output_path=os.path.join(args.output_dir, "prompt2_combined.png"),
+            output_path=os.path.join(args.output_dir, "prompt2_combined.html"),
             **pp_kwargs,
         )
         plot_sentence_level(
             result2["sentence_embeddings"],
             s_labels2,
-            output_path=os.path.join(args.output_dir, "prompt2_sentence.png"),
+            output_path=os.path.join(args.output_dir, "prompt2_sentence.html"),
             **pp_kwargs,
         )
         if result2["word_embeddings"]:
             plot_word_level(
                 result2["word_embeddings"],
                 w_labels2,
-                output_path=os.path.join(args.output_dir, "prompt2_word.png"),
+                output_path=os.path.join(args.output_dir, "prompt2_word.html"),
                 **pp_kwargs,
             )
 
@@ -254,14 +260,14 @@ def main():
             result1["word_embeddings"] + result2["word_embeddings"],
             all_s_labels,
             all_w_labels,
-            output_path=os.path.join(args.output_dir, "common.png"),
+            output_path=os.path.join(args.output_dir, "common.html"),
             **pp_kwargs,
         )
 
         plot_sentence_level(
             result1["sentence_embeddings"] + result2["sentence_embeddings"],
             all_s_labels,
-            output_path=os.path.join(args.output_dir, "common_sentence.png"),
+            output_path=os.path.join(args.output_dir, "common_sentence.html"),
             **pp_kwargs,
         )
 
@@ -269,13 +275,13 @@ def main():
             plot_word_level(
                 result1["word_embeddings"] + result2["word_embeddings"],
                 all_w_labels,
-                output_path=os.path.join(args.output_dir, "common_word.png"),
+                output_path=os.path.join(args.output_dir, "common_word.html"),
                 **pp_kwargs,
             )
 
     print("\nDone! Output files:")
     for f in sorted(os.listdir(args.output_dir)):
-        if f.endswith(".png"):
+        if f.endswith(".html"):
             print(f"  {f}")
 
 
